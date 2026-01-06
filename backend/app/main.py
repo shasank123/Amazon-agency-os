@@ -5,6 +5,10 @@ import time
 import random
 from app.agents.sue_graph import sue_graph
 
+# Import the tasks
+from app.worker import jeff_task
+from celery.result import AsyncResult
+
 # Import Mock Data
 from app.core.mock_db import MOCK_SELLERS, MOCK_INVENTORY, MOCK_ADS, MOCK_VECTOR_DB
 
@@ -18,33 +22,31 @@ class CampaignRequest(BaseModel):
 @app.post("/agents/jeff/start-campaign")
 def jeff_start_campaign(req: CampaignRequest):
     """
-    Simulates Jeff scraping 1M sellers to find matches.
+    True Event-Driven: We dispatch the task and return ID immediately.
     """
-    # Simulate processing time (Jeff is "thinking")
-    # time.sleep(1) 
+    # 1. Dispatch to Redis
+    task = jeff_task.delay(req.niche, req.min_revenue)
     
-    matches = [
-        s for s in MOCK_SELLERS 
-        if req.niche.lower() in s["niche"].lower() 
-        and s["revenue"] >= req.min_revenue
-    ]
-    
-    if not matches:
-        return {"status": "completed", "found": 0, "message": "No sellers found in this niche."}
-
-    # Simulate Email Generation (Template based on pain point)
-    campaign_results = []
-    for m in matches:
-        email_draft = f"Hi {m['brand']}, saw you're struggling with {m['pain_point']}. We can help."
-        campaign_results.append({"company": m["brand"], "email_draft": email_draft})
-
+    # 2. Return the Ticket ID instantly
     return {
         "agent": "Jeff",
-        "status": "active",
-        "leads_found": len(matches),
-        "campaign_data": campaign_results
+        "status": "queued",
+        "task_id": task.id,
+        "message": "Jeff has started scraping. Check status with /tasks/{task_id}"
     }
 
+@app.get("/tasks/{task_id}")
+def get_status(task_id: str):
+    """
+    Polling Endpoint: Frontend calls this every 3 seconds to check progress.
+    """
+    task_result = AsyncResult(task_id)
+    return {
+        "task_id": task_id,
+        "status": task_result.status,
+        "result": task_result.result
+    }
+    
 # --- 2. PENNY (Pricing Agent) ---
 @app.get("/agents/penny/repricing-log")
 def penny_optimize_prices():
