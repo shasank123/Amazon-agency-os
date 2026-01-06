@@ -6,7 +6,7 @@ import random
 from app.agents.sue_graph import sue_graph
 
 # Import the tasks
-from app.worker import jeff_task, penny_task, sue_task
+from app.worker import jeff_task, penny_task, sue_task, adam_task
 from celery.result import AsyncResult
 
 # Import Mock Data
@@ -100,30 +100,16 @@ def penny_analyze_pricing(req: PricingRequest):
     }
 
 
-# --- 3. ADAM (Ads Agent) ---
-@app.get("/agents/adam/audit-account")
-def adam_audit_ads():
-    """
-    Simulates Adam finding 'Bleeding' keywords.
-    """
-    recommendations = []
-    for ad in MOCK_ADS:
-        # Rule: High Spend, Zero Sales = KILL
-        if ad["sales"] == 0 and ad["spend"] > 50:
-            recommendations.append({
-                "keyword": ad["keyword"],
-                "action": "NEGATIVE_MATCH",
-                "reason": f"Bleeding Cash: Spent ${ad['spend']} with $0 return."
-            })
-        # Rule: High ROI = BOOST
-        elif ad["sales"] > (ad["spend"] * 4): # 4x ROAS
-            recommendations.append({
-                "keyword": ad["keyword"],
-                "action": "INCREASE_BID",
-                "reason": "High Performance (ROAS > 4.0)."
-            })
-            
-    return {"agent": "Adam", "actions": recommendations}
+# --- REQUEST MODEL (Add this with your other models) ---
+class AdRequest(BaseModel):
+    campaign_name: str
+
+# --- 3. ADAM (Real Ads Agent) ---
+@app.post("/agents/adam/optimize")
+async def start_adam(request: AdRequest):
+    # Triggers the worker task that checks SQL DB & uses LLM
+    task = adam_task.delay(request.campaign_name)
+    return {"agent": "Adam", "task_id": task.id, "status": "optimizing"}
 
 # --- 4. SUE (Reputation Agent - RAG) ---
 class ReviewRequest(BaseModel):

@@ -16,11 +16,8 @@ def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
     
-    # 1. Enable the Vector Extension
+    # 1. Enable Vector (for Sue) - ALREADY DONE
     cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-    
-    # 2. Create the Policies Table
-    # We use 1536 dimensions because that's what OpenAI's embedding model uses.
     cur.execute("""
         CREATE TABLE IF NOT EXISTS policies (
             id SERIAL PRIMARY KEY,
@@ -28,11 +25,24 @@ def init_db():
             embedding vector(1536)
         );
     """)
+
+    # 2. CREATE ANALYTICS TABLE (For Adam) <--- NEW
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS ad_metrics (
+            id SERIAL PRIMARY KEY,
+            date DATE NOT NULL,
+            campaign_name TEXT NOT NULL,
+            impressions INT DEFAULT 0,
+            clicks INT DEFAULT 0,
+            spend DECIMAL(10, 2) DEFAULT 0.00,
+            sales DECIMAL(10, 2) DEFAULT 0.00
+        );
+    """)
     
     conn.commit()
     cur.close()
     conn.close()
-    print("--- Database Initialized with Vector Support ---")
+    print("--- Database Initialized (Policies + Analytics) ---")
 
 if __name__ == "__main__":
     init_db()

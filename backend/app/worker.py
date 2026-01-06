@@ -207,3 +207,75 @@ def sue_task(ticket_text: str, order_status: str):
             "policy_used": policy_context
         }
     }
+
+# --- AGENT 4: ADAM (Advertising Manager) ---
+@celery_app.task(name="app.worker.adam_task")
+def adam_task(campaign_name: str):
+    print(f"--- ADAM: Analyzing Campaign '{campaign_name}' ---")
+    
+    # 1. FETCH DATA (The Analytics DB)
+    conn = psycopg2.connect(
+        host="db", database="agency_os", user="admin", password="admin"
+    )
+    cur = conn.cursor()
+    
+    # Get last 7 days metrics
+    cur.execute("""
+        SELECT SUM(spend), SUM(sales), SUM(clicks) 
+        FROM ad_metrics 
+        WHERE campaign_name = %s 
+        AND date > NOW() - INTERVAL '7 days';
+    """, (campaign_name,))
+    
+    row = cur.fetchone()
+    conn.close()
+    
+    if not row or row[0] is None:
+        return {"status": "FAILED", "error": "No data found for this campaign."}
+
+    total_spend, total_sales, total_clicks = row
+    # Handle Division by Zero
+    acos = (total_spend / total_sales * 100) if total_sales > 0 else 0
+    roas = (total_sales / total_spend) if total_spend > 0 else 0
+    cpc = (total_spend / total_clicks) if total_clicks > 0 else 0
+
+    # 2. DECISION LOGIC (The Brain)
+    action = "HOLD"
+    if acos > 40:
+        action = "DECREASE BID (High ACOS)"
+    elif roas > 4:
+        action = "INCREASE BID (High ROAS)"
+    
+    # 3. REPORT GENERATION (LLM)
+    prompt = f"""
+    You are Adam, a PPC Ad Manager.
+    Campaign: "{campaign_name}"
+    Last 7 Days Data:
+    - Spend: ${total_spend:.2f}
+    - Sales: ${total_sales:.2f}
+    - ACOS: {acos:.1f}% (Target is < 30%)
+    - ROAS: {roas:.2f}x
+    
+    Based on this, explain why you decided to: {action}.
+    Be analytical and professional. Max 50 words.
+    """
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        reasoning = response.choices[0].message.content
+    except:
+        reasoning = "Analysis complete."
+
+    return {
+        "status": "COMPLETED",
+        "report": {
+            "spend": f"${total_spend:.2f}",
+            "sales": f"${total_sales:.2f}",
+            "acos": f"{acos:.1f}%",
+            "decision": action,
+            "reasoning": reasoning
+        }
+    }

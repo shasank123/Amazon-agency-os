@@ -61,20 +61,16 @@ export const pennyApi = {
 }
 
 // --- Adam (Ads Agent) ---
-export interface AdAction {
-    keyword: string
-    action: string
-    reason: string
-}
-
-export interface AdamResponse {
-    agent: string
-    actions: AdAction[]
+export interface AdCampaignRequest {
+    campaign_name: string
 }
 
 export const adamApi = {
-    auditAccount: () =>
-        api.get<AdamResponse>('/agents/adam/audit-account'),
+    optimizeCampaign: (data: AdCampaignRequest) =>
+        api.post('/agents/adam/optimize', data),
+
+    getTaskStatus: (taskId: string) =>
+        api.get<TaskStatus>(`/tasks/${taskId}`),
 }
 
 // --- Sue (Reputation Agent) ---

@@ -260,9 +260,31 @@ function PennyCard() {
 
 // --- Adam Card ---
 function AdamCard() {
-    const query = useMutation({
-        mutationFn: () => adamApi.auditAccount(),
+    const [campaign, setCampaign] = useState('Gaming Mouse - Exact')
+    const [taskId, setTaskId] = useState<string | null>(null)
+
+    const startMutation = useMutation({
+        mutationFn: () => adamApi.optimizeCampaign({ campaign_name: campaign }),
+        onSuccess: (res) => setTaskId(res.data.task_id),
     })
+
+    const statusQuery = useQuery({
+        queryKey: ['adam-task', taskId],
+        queryFn: () => adamApi.getTaskStatus(taskId!),
+        enabled: !!taskId,
+        refetchInterval: (query) => {
+            const status = query.state.data?.data.status
+            if (status === 'SUCCESS' || status === 'FAILURE') return false
+            return 2000
+        },
+    })
+
+    const taskStatus = statusQuery.data?.data.status
+    const taskResult = statusQuery.data?.data.result as {
+        report?: { spend: string; sales: string; acos: string; decision: string; reasoning: string },
+        error?: string
+    } | null
+    const isComplete = taskStatus === 'SUCCESS'
 
     return (
         <Card>
@@ -272,33 +294,70 @@ function AdamCard() {
                         <Megaphone className="h-5 w-5 text-orange-500" />
                         <CardTitle className="text-lg">Adam</CardTitle>
                     </div>
-                    <Badge variant="outline">Ads</Badge>
+                    <Badge variant="outline">PPC Analytics</Badge>
                 </div>
-                <CardDescription>Bleeding keyword detection</CardDescription>
+                <CardDescription>Campaign ACOS/ROAS optimization</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+                <select
+                    className="w-full p-2 rounded bg-muted text-sm border border-input"
+                    value={campaign}
+                    onChange={(e) => setCampaign(e.target.value)}
+                >
+                    <option value="Gaming Mouse - Exact">Gaming Mouse - Exact</option>
+                    <option value="Office Chair - Broad">Office Chair - Broad</option>
+                    <option value="Headphones - Auto">Headphones - Auto</option>
+                </select>
+
                 <Button
                     className="w-full"
-                    onClick={() => query.mutate()}
-                    disabled={query.isPending}
+                    onClick={() => { setTaskId(null); startMutation.mutate() }}
+                    disabled={startMutation.isPending || (!!taskId && !isComplete)}
                 >
-                    {query.isPending ? (
+                    {startMutation.isPending || (taskId && !isComplete) ? (
                         <Loader2 className="h-4 w-4 animate-spin mr-2" />
                     ) : (
                         <Play className="h-4 w-4 mr-2" />
                     )}
-                    Audit Ads
+                    {isComplete ? 'Analyze Again' : 'Optimize Campaign'}
                 </Button>
-                {query.data && (
-                    <div className="text-sm space-y-1">
-                        {query.data.data.actions.map((a, i) => (
-                            <div key={i} className="flex items-center gap-2">
-                                <Badge variant={a.action === 'NEGATIVE_MATCH' ? 'destructive' : 'default'} className="text-xs">
-                                    {a.action}
-                                </Badge>
-                                <span className="truncate text-xs">{a.keyword}</span>
+
+                {isComplete && taskResult?.error && (
+                    <div className="p-2 bg-red-500/10 rounded text-xs text-red-400">
+                        ⚠️ {taskResult.error}
+                    </div>
+                )}
+
+                {isComplete && taskResult?.report && (
+                    <div className="space-y-2">
+                        <div className="grid grid-cols-2 gap-2 text-center">
+                            <div className="p-2 bg-muted rounded">
+                                <p className="text-xs text-muted-foreground">Spend</p>
+                                <p className="text-sm font-bold text-red-400">{taskResult.report.spend}</p>
                             </div>
-                        ))}
+                            <div className="p-2 bg-muted rounded">
+                                <p className="text-xs text-muted-foreground">Sales</p>
+                                <p className="text-sm font-bold text-green-400">{taskResult.report.sales}</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs text-muted-foreground">ACOS:</span>
+                            <Badge variant={parseFloat(taskResult.report.acos) > 30 ? 'destructive' : 'default'}>
+                                {taskResult.report.acos}
+                            </Badge>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs text-muted-foreground">Decision:</span>
+                            <Badge variant={taskResult.report.decision.includes('DECREASE') ? 'destructive' : 'default'}>
+                                {taskResult.report.decision}
+                            </Badge>
+                        </div>
+                        <div className="p-2 bg-muted rounded">
+                            <p className="text-xs text-muted-foreground mb-1">🤖 AI Analysis:</p>
+                            <p className="text-sm text-green-400 break-words whitespace-normal leading-relaxed">
+                                {taskResult.report.reasoning}
+                            </p>
+                        </div>
                     </div>
                 )}
             </CardContent>
@@ -329,8 +388,8 @@ function SueCard() {
     })
 
     const taskStatus = statusQuery.data?.data.status
-    const taskResult = statusQuery.data?.data.result as { 
-        response?: { reply: string; policy_used: string } 
+    const taskResult = statusQuery.data?.data.result as {
+        response?: { reply: string; policy_used: string }
     } | null
     const isComplete = taskStatus === 'SUCCESS'
 
@@ -352,7 +411,7 @@ function SueCard() {
                     value={ticket}
                     onChange={(e) => setTicket(e.target.value)}
                 />
-                <select 
+                <select
                     className="w-full p-2 rounded bg-muted text-sm border border-input"
                     value={orderStatus}
                     onChange={(e) => setOrderStatus(e.target.value)}
@@ -362,7 +421,7 @@ function SueCard() {
                     <option value="Processing">Processing</option>
                     <option value="Cancelled">Cancelled</option>
                 </select>
-                
+
                 <Button
                     className="w-full"
                     onClick={() => { setTaskId(null); startMutation.mutate() }}
