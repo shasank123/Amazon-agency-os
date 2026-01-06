@@ -42,9 +42,22 @@ export interface PennyResponse {
     optimization_events: PricingLog[]
 }
 
+export interface PricingAnalysisRequest {
+    product: string
+    price: number
+    cost: number
+    competitor_price: number
+}
+
 export const pennyApi = {
     getRepricingLog: () =>
         api.get<PennyResponse>('/agents/penny/repricing-log'),
+
+    analyzePricing: (data: PricingAnalysisRequest) =>
+        api.post('/agents/penny/analyze', data),
+
+    getTaskStatus: (taskId: string) =>
+        api.get<TaskStatus>(`/tasks/${taskId}`),
 }
 
 // --- Adam (Ads Agent) ---
@@ -76,6 +89,11 @@ export interface SueApproveResponse {
     final_output: string
 }
 
+export interface TicketRequest {
+    ticket_text: string
+    order_status: string
+}
+
 export const sueApi = {
     startWorkflow: (review: string) =>
         api.post<SueDraftResponse>('/agents/sue/start-workflow', null, {
@@ -86,6 +104,12 @@ export const sueApi = {
         api.post<SueApproveResponse>('/agents/sue/approve', null, {
             params: { edited_text: editedText },
         }),
+
+    handleTicket: (data: TicketRequest) =>
+        api.post('/agents/sue/handle-ticket', data),
+
+    getTaskStatus: (taskId: string) =>
+        api.get<TaskStatus>(`/tasks/${taskId}`),
 }
 
 // --- Ivan (Inventory Agent) ---

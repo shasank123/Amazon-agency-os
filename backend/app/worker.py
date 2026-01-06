@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 import os
 from duckduckgo_search import DDGS  # <--- The Search Engine
+import psycopg2
 
 # Load API Key
 load_dotenv()
@@ -80,15 +81,129 @@ def jeff_task(niche: str, min_revenue: int):
         ]
     }
 
-# --- PENNY'S TASK (The Pricing Agent) ---
+# --- AGENT 2: PENNY (Pricing & Profit) ---
 @celery_app.task(name="app.worker.penny_task")
-def penny_task():
-    print("--- PENNY: Checking Competitor Prices ---")
-    time.sleep(3) # Simulate API latency
+def penny_task(product: str, price: float, cost: float, competitor_price: float):
+    print(f"--- PENNY: Analyzing {product} (Price: ${price}, Cost: ${cost}) ---")
     
-    updates = []
-    for sku, data in MOCK_INVENTORY.items():
-        if data["competitor_price"] < data["price"]:
-            updates.append(f"Lowering {sku} to ${data['competitor_price'] - 0.05}")
-            
-    return {"updates": updates}
+    # 1. HARD LOGIC (Math doesn't hallucinate)
+    margin = ((price - cost) / price) * 100
+    undercut_by_competitor = competitor_price < price
+    
+    # 2. EDGE CASE HANDLING
+    flags = []
+    if margin < 15:
+        flags.append("CRITICAL: Low Margin")
+    if margin < 0:
+        flags.append("EMERGENCY: Selling at Loss")
+    if undercut_by_competitor:
+        diff = price - competitor_price
+        flags.append(f"Competitor is ${diff:.2f} cheaper")
+
+    # 3. STRATEGIC THINKING (LLM)
+    prompt = f"""
+    You are Penny, a ruthless Profit Analyst. 
+    Product: {product}. 
+    Our Price: ${price}. Cost: ${cost}. Competitor Price: ${competitor_price}.
+    Current Margin: {margin:.1f}%.
+    Flags: {', '.join(flags)}.
+
+    Decide a pricing strategy (Raise, Lower, or Hold). 
+    If margin is low, suggest cost-cutting. 
+    If competitor is cheaper, explain why we are premium or suggest a discount.
+    Keep it strictly under 50 words.
+    """
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        strategy = response.choices[0].message.content
+    except Exception as e:
+        strategy = f"Error generating strategy: {str(e)}"
+
+    return {
+        "status": "COMPLETED",
+        "analysis": {
+            "margin": f"{margin:.1f}%",
+            "flags": flags,
+            "strategy": strategy
+        }
+    }
+
+# --- HELPER: RAG RETRIEVAL ---
+def get_relevant_policy(query_text: str):
+    try:
+        # 1. Embed the user's query
+        response = client.embeddings.create(
+            input=query_text,
+            model="text-embedding-3-small"
+        )
+        query_embedding = response.data[0].embedding
+
+        # 2. Search DB for "Nearest Neighbor"
+        # Connect to 'db' (service name) because this runs INSIDE Docker
+        conn = psycopg2.connect(
+            host="db", database="agency_os", user="admin", password="admin"
+        )
+        cur = conn.cursor()
+        
+        # The <=> operator finds the closest vector (cosine similarity)
+        cur.execute("""
+            SELECT text FROM policies 
+            ORDER BY embedding <=> %s::vector 
+            LIMIT 1;
+        """, (query_embedding,))
+        
+        result = cur.fetchone()
+        conn.close()
+        
+        if result:
+            return result[0]
+        return "No specific policy found."
+        
+    except Exception as e:
+        print(f"RAG Error: {e}")
+        return "System Error retrieving policy."
+
+# --- AGENT 3: SUE (RAG-Enabled Support) ---
+@celery_app.task(name="app.worker.sue_task")
+def sue_task(ticket_text: str, order_status: str):
+    print(f"--- SUE: Handling Ticket. Status: {order_status} ---")
+    
+    # 1. RETRIEVE KNOWLEDGE (RAG)
+    policy_context = get_relevant_policy(ticket_text)
+    print(f"--- SUE: Found Policy -> '{policy_context}' ---")
+
+    # 2. GENERATE ANSWER (LLM)
+    prompt = f"""
+    You are Sue, a Customer Support Agent.
+    
+    Customer Issue: "{ticket_text}"
+    Order Status: "{order_status}"
+    
+    OFFICIAL POLICY: "{policy_context}"
+    
+    Instructions:
+    - Answer the customer strictly based on the policy above.
+    - If the policy allows a refund/replacement, approve it.
+    - If the policy denies it (e.g., past 30 days), politely refuse.
+    """
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        reply = response.choices[0].message.content
+    except Exception as e:
+        reply = "System Error."
+
+    return {
+        "status": "COMPLETED",
+        "response": {
+            "reply": reply,
+            "policy_used": policy_context
+        }
+    }

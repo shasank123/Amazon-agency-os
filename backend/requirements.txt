@@ -12,3 +12,4 @@ langchain # For Agent Logic
 langgraph # For Stateful Graphs
 asyncpg
 duckduckgo-search
+psycopg2-binary

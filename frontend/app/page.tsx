@@ -170,9 +170,33 @@ function JeffCard() {
 
 // --- Penny Card ---
 function PennyCard() {
-    const query = useMutation({
-        mutationFn: () => pennyApi.getRepricingLog(),
+    const [product, setProduct] = useState('Wireless Earbuds')
+    const [price, setPrice] = useState(49.99)
+    const [cost, setCost] = useState(15.00)
+    const [competitorPrice, setCompetitorPrice] = useState(44.99)
+    const [taskId, setTaskId] = useState<string | null>(null)
+
+    const startMutation = useMutation({
+        mutationFn: () => pennyApi.analyzePricing({ product, price, cost, competitor_price: competitorPrice }),
+        onSuccess: (res) => setTaskId(res.data.task_id),
     })
+
+    const statusQuery = useQuery({
+        queryKey: ['penny-task', taskId],
+        queryFn: () => pennyApi.getTaskStatus(taskId!),
+        enabled: !!taskId,
+        refetchInterval: (query) => {
+            const status = query.state.data?.data.status
+            if (status === 'SUCCESS' || status === 'FAILURE') return false
+            return 2000
+        },
+    })
+
+    const taskStatus = statusQuery.data?.data.status
+    const taskResult = statusQuery.data?.data.result as {
+        analysis?: { margin: string; flags: string[]; strategy: string }
+    } | null
+    const isComplete = taskStatus === 'SUCCESS'
 
     return (
         <Card>
@@ -182,35 +206,51 @@ function PennyCard() {
                         <DollarSign className="h-5 w-5 text-green-500" />
                         <CardTitle className="text-lg">Penny</CardTitle>
                     </div>
-                    <Badge variant="outline">Pricing</Badge>
+                    <Badge variant="outline">Pricing AI</Badge>
                 </div>
-                <CardDescription>Competitor price matching</CardDescription>
+                <CardDescription>Margin analysis + LLM strategy</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                    <Input placeholder="Product" value={product} onChange={(e) => setProduct(e.target.value)} />
+                    <Input type="number" placeholder="Our Price" value={price} onChange={(e) => setPrice(Number(e.target.value))} />
+                    <Input type="number" placeholder="Cost" value={cost} onChange={(e) => setCost(Number(e.target.value))} />
+                    <Input type="number" placeholder="Competitor $" value={competitorPrice} onChange={(e) => setCompetitorPrice(Number(e.target.value))} />
+                </div>
+
                 <Button
                     className="w-full"
-                    onClick={() => query.mutate()}
-                    disabled={query.isPending}
+                    onClick={() => { setTaskId(null); startMutation.mutate() }}
+                    disabled={startMutation.isPending || (!!taskId && !isComplete)}
                 >
-                    {query.isPending ? (
+                    {startMutation.isPending || (taskId && !isComplete) ? (
                         <Loader2 className="h-4 w-4 animate-spin mr-2" />
                     ) : (
                         <Play className="h-4 w-4 mr-2" />
                     )}
-                    Check Prices
+                    {isComplete ? 'Analyze Again' : 'Analyze Pricing'}
                 </Button>
-                {query.data && (
-                    <div className="text-sm space-y-1">
-                        {query.data.data.optimization_events.map((e, i) => (
-                            <div key={i} className="flex items-center gap-2">
-                                {e.action === 'DECREASE_PRICE' ? (
-                                    <AlertCircle className="h-3 w-3 text-yellow-500" />
-                                ) : (
-                                    <CheckCircle2 className="h-3 w-3 text-green-500" />
-                                )}
-                                <span className="truncate">{e.sku}: {e.action}</span>
+
+                {isComplete && taskResult?.analysis && (
+                    <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                            <Badge variant={parseFloat(taskResult.analysis.margin) < 15 ? 'destructive' : 'default'}>
+                                Margin: {taskResult.analysis.margin}
+                            </Badge>
+                        </div>
+                        {taskResult.analysis.flags.length > 0 && (
+                            <div className="p-2 bg-yellow-500/10 rounded text-xs text-yellow-400 space-y-1">
+                                {taskResult.analysis.flags.map((f, i) => (
+                                    <p key={i}>⚠️ {f}</p>
+                                ))}
                             </div>
-                        ))}
+                        )}
+                        <div className="p-2 bg-muted rounded">
+                            <p className="text-xs text-muted-foreground mb-1">AI Strategy:</p>
+                            <p className="text-sm text-green-400 break-words whitespace-normal">
+                                {taskResult.analysis.strategy}
+                            </p>
+                        </div>
                     </div>
                 )}
             </CardContent>
@@ -268,17 +308,31 @@ function AdamCard() {
 
 // --- Sue Card ---
 function SueCard() {
-    const [review, setReview] = useState('')
-    const [draft, setDraft] = useState('')
+    const [ticket, setTicket] = useState('I want a refund for my order')
+    const [orderStatus, setOrderStatus] = useState('Delivered')
+    const [taskId, setTaskId] = useState<string | null>(null)
 
     const startMutation = useMutation({
-        mutationFn: () => sueApi.startWorkflow(review),
-        onSuccess: (res) => setDraft(res.data.draft),
+        mutationFn: () => sueApi.handleTicket({ ticket_text: ticket, order_status: orderStatus }),
+        onSuccess: (res) => setTaskId(res.data.task_id),
     })
 
-    const approveMutation = useMutation({
-        mutationFn: () => sueApi.approve(draft),
+    const statusQuery = useQuery({
+        queryKey: ['sue-task', taskId],
+        queryFn: () => sueApi.getTaskStatus(taskId!),
+        enabled: !!taskId,
+        refetchInterval: (query) => {
+            const status = query.state.data?.data.status
+            if (status === 'SUCCESS' || status === 'FAILURE') return false
+            return 2000
+        },
     })
+
+    const taskStatus = statusQuery.data?.data.status
+    const taskResult = statusQuery.data?.data.result as { 
+        response?: { reply: string; policy_used: string } 
+    } | null
+    const isComplete = taskStatus === 'SUCCESS'
 
     return (
         <Card>
@@ -288,49 +342,55 @@ function SueCard() {
                         <MessageSquare className="h-5 w-5 text-purple-500" />
                         <CardTitle className="text-lg">Sue</CardTitle>
                     </div>
-                    <Badge variant="outline">Reputation</Badge>
+                    <Badge variant="outline">RAG Support</Badge>
                 </div>
-                <CardDescription>Review reply with RAG</CardDescription>
+                <CardDescription>Policy retrieval + AI response</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
                 <Input
-                    placeholder="Enter bad review..."
-                    value={review}
-                    onChange={(e) => setReview(e.target.value)}
+                    placeholder="Customer issue..."
+                    value={ticket}
+                    onChange={(e) => setTicket(e.target.value)}
                 />
-                {!draft ? (
-                    <Button
-                        className="w-full"
-                        onClick={() => startMutation.mutate()}
-                        disabled={startMutation.isPending || !review}
-                    >
-                        {startMutation.isPending ? (
-                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                        ) : (
-                            <Play className="h-4 w-4 mr-2" />
-                        )}
-                        Draft Reply
-                    </Button>
-                ) : (
-                    <>
-                        <div className="p-2 bg-muted rounded text-sm">{draft}</div>
-                        <Button
-                            className="w-full"
-                            variant="secondary"
-                            onClick={() => approveMutation.mutate()}
-                            disabled={approveMutation.isPending}
-                        >
-                            {approveMutation.isPending ? (
-                                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                            ) : (
-                                <CheckCircle2 className="h-4 w-4 mr-2" />
-                            )}
-                            Approve & Publish
-                        </Button>
-                    </>
-                )}
-                {approveMutation.isSuccess && (
-                    <Badge className="bg-green-600">Published!</Badge>
+                <select 
+                    className="w-full p-2 rounded bg-muted text-sm border border-input"
+                    value={orderStatus}
+                    onChange={(e) => setOrderStatus(e.target.value)}
+                >
+                    <option value="Delivered">Delivered</option>
+                    <option value="In Transit">In Transit</option>
+                    <option value="Processing">Processing</option>
+                    <option value="Cancelled">Cancelled</option>
+                </select>
+                
+                <Button
+                    className="w-full"
+                    onClick={() => { setTaskId(null); startMutation.mutate() }}
+                    disabled={startMutation.isPending || (!!taskId && !isComplete) || !ticket}
+                >
+                    {startMutation.isPending || (taskId && !isComplete) ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                        <Play className="h-4 w-4 mr-2" />
+                    )}
+                    {isComplete ? 'Handle Another' : 'Handle Ticket'}
+                </Button>
+
+                {isComplete && taskResult?.response && (
+                    <div className="space-y-2">
+                        <div className="p-2 bg-blue-500/10 rounded">
+                            <p className="text-xs text-muted-foreground mb-1">📋 Policy Retrieved:</p>
+                            <p className="text-xs text-blue-400 break-words whitespace-normal">
+                                {taskResult.response.policy_used}
+                            </p>
+                        </div>
+                        <div className="p-2 bg-muted rounded">
+                            <p className="text-xs text-muted-foreground mb-1">💬 AI Response:</p>
+                            <p className="text-sm text-green-400 break-words whitespace-normal leading-relaxed">
+                                {taskResult.response.reply}
+                            </p>
+                        </div>
+                    </div>
                 )}
             </CardContent>
         </Card>

@@ -6,7 +6,7 @@ import random
 from app.agents.sue_graph import sue_graph
 
 # Import the tasks
-from app.worker import jeff_task
+from app.worker import jeff_task, penny_task, sue_task
 from celery.result import AsyncResult
 
 # Import Mock Data
@@ -79,6 +79,27 @@ def penny_optimize_prices():
     
     return {"agent": "Penny", "optimization_events": logs}
 
+# --- 2b. PENNY ASYNC (Pricing Analysis with LLM) ---
+class PricingRequest(BaseModel):
+    product: str
+    price: float
+    cost: float
+    competitor_price: float
+
+@app.post("/agents/penny/analyze")
+def penny_analyze_pricing(req: PricingRequest):
+    """
+    Async pricing analysis with margin calculation and LLM strategy.
+    """
+    task = penny_task.delay(req.product, req.price, req.cost, req.competitor_price)
+    return {
+        "agent": "Penny",
+        "status": "queued",
+        "task_id": task.id,
+        "message": "Penny is analyzing pricing. Check status with /tasks/{task_id}"
+    }
+
+
 # --- 3. ADAM (Ads Agent) ---
 @app.get("/agents/adam/audit-account")
 def adam_audit_ads():
@@ -131,6 +152,24 @@ def sue_draft_reply(req: ReviewRequest):
         "policy_used": retrieved_policy,
         "draft_reply": draft,
         "human_approval_required": True
+    }
+
+# --- 4b. SUE ASYNC (RAG-Powered Support) ---
+class TicketRequest(BaseModel):
+    ticket_text: str
+    order_status: str
+
+@app.post("/agents/sue/handle-ticket")
+def sue_handle_ticket(req: TicketRequest):
+    """
+    Async RAG-powered ticket handling with policy retrieval.
+    """
+    task = sue_task.delay(req.ticket_text, req.order_status)
+    return {
+        "agent": "Sue",
+        "status": "queued",
+        "task_id": task.id,
+        "message": "Sue is retrieving policy and drafting response. Check status with /tasks/{task_id}"
     }
 
 # --- 5. IVAN (Inventory Agent) ---
