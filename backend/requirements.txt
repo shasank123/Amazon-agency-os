@@ -9,4 +9,5 @@ python-dotenv
 openai
 pgvector  # For RAG
 langchain # For Agent Logic
+langgraph # For Stateful Graphs
 asyncpg

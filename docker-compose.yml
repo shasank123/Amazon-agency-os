@@ -1,9 +1,9 @@
 version: '3.8'
 
 services:
-  # The Database (Stores User Data + Vector Embeddings for RAG)
+  # 1. The Database
   db:
-    image: pgvector/pgvector:pg16  # Special image for AI Vectors
+    image: pgvector/pgvector:pg16
     ports:
       - "5432:5432"
     environment:
@@ -13,16 +13,39 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-  # The Queue (Stores Tasks for Agents)
+  # 2. The Queue
   redis:
     image: redis:alpine
     ports:
       - "6379:6379"
 
-  # The Dashboard UI (We will set this up later, placeholder for now)
-  # frontend:
-  #   build: ./frontend
-  #   ports: ["3000:3000"]
+  # 3. The Brain (FastAPI)
+  backend:
+    build: ./backend # Uses your Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app # Syncs code changes instantly (Hot Reload)
+    depends_on:
+      - db
+      - redis
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    # The default CMD in Dockerfile runs Uvicorn, so we don't need to type it here.
+
+    # 4. The Muscle (Celery Worker) - USES THE SAME IMAGE!
+  worker:
+    build: ./backend # Reuses the exact same code
+    command: celery -A app.core.celery_app worker --loglevel=info
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - backend
+      - redis
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
 
 volumes:
   postgres_data:
