@@ -1,0 +1,23 @@
+# --- Python & Backend ---
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+.pytest_cache/
+
+# --- Next.js & Frontend ---
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.DS_Store
+
+# --- Docker & Database ---
+# Ignore the actual database files (volumes)
+postgres_data/
+redis_data/
+
+# --- IDE Settings ---
+.vscode/
+.idea/

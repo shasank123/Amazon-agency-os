@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  # The Database (Stores User Data + Vector Embeddings for RAG)
+  db:
+    image: pgvector/pgvector:pg16  # Special image for AI Vectors
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin
+      - POSTGRES_DB=agency_os
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # The Queue (Stores Tasks for Agents)
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+
+  # The Dashboard UI (We will set this up later, placeholder for now)
+  # frontend:
+  #   build: ./frontend
+  #   ports: ["3000:3000"]
+
+volumes:
+  postgres_data:
