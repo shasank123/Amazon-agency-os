@@ -38,6 +38,19 @@ def init_db():
             sales DECIMAL(10, 2) DEFAULT 0.00
         );
     """)
+
+    # 3. CREATE INVENTORY TABLE (For Ivan) <--- NEW
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS inventory (
+            sku TEXT PRIMARY KEY,
+            product_name TEXT NOT NULL,
+            current_stock INT NOT NULL,
+            reorder_point INT NOT NULL,
+            reorder_qty INT NOT NULL,
+            supplier_email TEXT NOT NULL,
+            unit_cost DECIMAL(10, 2) NOT NULL
+        );
+    """)
     
     conn.commit()
     cur.close()

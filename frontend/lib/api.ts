@@ -109,22 +109,16 @@ export const sueApi = {
 }
 
 // --- Ivan (Inventory Agent) ---
-export interface StockAlert {
+export interface InventoryRequest {
     sku: string
-    status: string
-    days_remaining: number
-    action: string
-    quantity_to_order: number
-}
-
-export interface IvanResponse {
-    agent: string
-    stock_alerts: StockAlert[]
 }
 
 export const ivanApi = {
-    getForecast: () =>
-        api.get<IvanResponse>('/agents/ivan/forecast'),
+    checkStock: (data: InventoryRequest) =>
+        api.post('/agents/ivan/check-stock', data),
+
+    getTaskStatus: (taskId: string) =>
+        api.get<TaskStatus>(`/tasks/${taskId}`),
 }
 
 // --- Lisa (SEO Agent) ---

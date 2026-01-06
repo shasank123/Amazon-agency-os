@@ -6,7 +6,7 @@ import random
 from app.agents.sue_graph import sue_graph
 
 # Import the tasks
-from app.worker import jeff_task, penny_task, sue_task, adam_task
+from app.worker import jeff_task, penny_task, sue_task, adam_task, ivan_task
 from celery.result import AsyncResult
 
 # Import Mock Data
@@ -158,28 +158,15 @@ def sue_handle_ticket(req: TicketRequest):
         "message": "Sue is retrieving policy and drafting response. Check status with /tasks/{task_id}"
     }
 
+# --- REQUEST MODEL ---
+class InventoryRequest(BaseModel):
+    sku: str
+
 # --- 5. IVAN (Inventory Agent) ---
-@app.get("/agents/ivan/forecast")
-def ivan_forecast_stock():
-    """
-    Simulates Ivan predicting stockouts.
-    """
-    alerts = []
-    lead_time_days = 15 # Time to ship from China
-    
-    for sku, data in MOCK_INVENTORY.items():
-        days_left = data["stock"] / data["velocity_per_day"]
-        
-        if days_left < lead_time_days:
-            alerts.append({
-                "sku": sku,
-                "status": "CRITICAL",
-                "days_remaining": days_left,
-                "action": "GENERATE_PO",
-                "quantity_to_order": 1000 # Simplified logic
-            })
-            
-    return {"agent": "Ivan", "stock_alerts": alerts}
+@app.post("/agents/ivan/check-stock")
+async def start_ivan(request: InventoryRequest):
+    task = ivan_task.delay(request.sku)
+    return {"agent": "Ivan", "task_id": task.id, "status": "checking_inventory"}
 
 # --- 6. LISA (SEO Agent) ---
 @app.get("/agents/lisa/audit-listing/{sku}")

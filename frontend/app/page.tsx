@@ -458,9 +458,33 @@ function SueCard() {
 
 // --- Ivan Card ---
 function IvanCard() {
-    const query = useMutation({
-        mutationFn: () => ivanApi.getForecast(),
+    const [sku, setSku] = useState('GM-001')
+    const [taskId, setTaskId] = useState<string | null>(null)
+
+    const startMutation = useMutation({
+        mutationFn: () => ivanApi.checkStock({ sku }),
+        onSuccess: (res) => setTaskId(res.data.task_id),
     })
+
+    const statusQuery = useQuery({
+        queryKey: ['ivan-task', taskId],
+        queryFn: () => ivanApi.getTaskStatus(taskId!),
+        enabled: !!taskId,
+        refetchInterval: (query) => {
+            const status = query.state.data?.data.status
+            if (status === 'SUCCESS' || status === 'FAILURE') return false
+            return 2000
+        },
+    })
+
+    const taskStatus = statusQuery.data?.data.status
+    const taskResult = statusQuery.data?.data.result as {
+        decision?: string,
+        details?: string,
+        po_details?: { sku: string; product: string; stock_level: string; order_qty: number; total_cost: string; supplier: string; email_draft: string },
+        error?: string
+    } | null
+    const isComplete = taskStatus === 'SUCCESS'
 
     return (
         <Card>
@@ -470,42 +494,71 @@ function IvanCard() {
                         <Package className="h-5 w-5 text-red-500" />
                         <CardTitle className="text-lg">Ivan</CardTitle>
                     </div>
-                    <Badge variant="outline">Inventory</Badge>
+                    <Badge variant="outline">Inventory AI</Badge>
                 </div>
-                <CardDescription>Stockout prediction</CardDescription>
+                <CardDescription>Stock check + PO drafting</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+                <select
+                    className="w-full p-2 rounded bg-muted text-sm border border-input"
+                    value={sku}
+                    onChange={(e) => setSku(e.target.value)}
+                >
+                    <option value="GM-001">GM-001 - RGB Gaming Mouse (LOW)</option>
+                    <option value="CH-999">CH-999 - Ergo Office Chair (OK)</option>
+                </select>
+
                 <Button
                     className="w-full"
-                    onClick={() => query.mutate()}
-                    disabled={query.isPending}
+                    onClick={() => { setTaskId(null); startMutation.mutate() }}
+                    disabled={startMutation.isPending || (!!taskId && !isComplete)}
                 >
-                    {query.isPending ? (
+                    {startMutation.isPending || (taskId && !isComplete) ? (
                         <Loader2 className="h-4 w-4 animate-spin mr-2" />
                     ) : (
                         <Play className="h-4 w-4 mr-2" />
                     )}
-                    Forecast Stock
+                    {isComplete ? 'Check Again' : 'Check Stock'}
                 </Button>
-                {query.data && (
-                    <div className="text-sm space-y-1">
-                        {query.data.data.stock_alerts.length === 0 ? (
-                            <div className="flex items-center gap-2 text-green-500">
-                                <CheckCircle2 className="h-3 w-3" />
-                                All stock levels OK
+
+                {isComplete && taskResult?.error && (
+                    <div className="p-2 bg-red-500/10 rounded text-xs text-red-400">
+                        ⚠️ {taskResult.error}
+                    </div>
+                )}
+
+                {isComplete && taskResult?.decision === 'STOCK HEALTHY' && (
+                    <div className="p-2 bg-green-500/10 rounded flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        <span className="text-sm text-green-400">{taskResult.details}</span>
+                    </div>
+                )}
+
+                {isComplete && taskResult?.po_details && (
+                    <div className="space-y-2">
+                        <Badge variant="destructive" className="w-full justify-center">
+                            ⚠️ REORDER TRIGGERED
+                        </Badge>
+                        <div className="grid grid-cols-2 gap-2 text-center text-xs">
+                            <div className="p-2 bg-muted rounded">
+                                <p className="text-muted-foreground">Stock</p>
+                                <p className="font-bold text-red-400">{taskResult.po_details.stock_level}</p>
                             </div>
-                        ) : (
-                            query.data.data.stock_alerts.map((a, i) => (
-                                <div key={i} className="flex items-center gap-2">
-                                    <Badge variant="destructive" className="text-xs">
-                                        {a.status}
-                                    </Badge>
-                                    <span className="truncate text-xs">
-                                        {a.sku}: {Math.round(a.days_remaining)} days left
-                                    </span>
-                                </div>
-                            ))
-                        )}
+                            <div className="p-2 bg-muted rounded">
+                                <p className="text-muted-foreground">Order Qty</p>
+                                <p className="font-bold text-green-400">{taskResult.po_details.order_qty}</p>
+                            </div>
+                        </div>
+                        <div className="p-2 bg-muted rounded text-xs">
+                            <p className="text-muted-foreground mb-1">📧 To: {taskResult.po_details.supplier}</p>
+                            <p className="text-muted-foreground mb-1">💰 Total: {taskResult.po_details.total_cost}</p>
+                        </div>
+                        <div className="p-2 bg-blue-500/10 rounded max-h-32 overflow-y-auto">
+                            <p className="text-xs text-muted-foreground mb-1">📝 Draft PO Email:</p>
+                            <p className="text-xs text-blue-400 break-words whitespace-pre-wrap leading-relaxed">
+                                {taskResult.po_details.email_draft}
+                            </p>
+                        </div>
                     </div>
                 )}
             </CardContent>

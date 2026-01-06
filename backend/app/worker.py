@@ -279,3 +279,70 @@ def adam_task(campaign_name: str):
             "reasoning": reasoning
         }
     }
+
+# --- AGENT 5: IVAN (Inventory Manager) ---
+@celery_app.task(name="app.worker.ivan_task")
+def ivan_task(sku: str):
+    print(f"--- IVAN: Checking Stock for SKU: {sku} ---")
+    
+    # 1. CHECK DB
+    conn = psycopg2.connect(
+        host="db", database="agency_os", user="admin", password="admin"
+    )
+    cur = conn.cursor()
+    cur.execute("SELECT product_name, current_stock, reorder_point, reorder_qty, supplier_email, unit_cost FROM inventory WHERE sku = %s", (sku,))
+    row = cur.fetchone()
+    conn.close()
+
+    if not row:
+        return {"status": "FAILED", "error": "SKU not found."}
+
+    name, stock, point, qty, email, cost = row
+
+    # 2. DECISION LOGIC
+    if stock >= point:
+        return {
+            "status": "COMPLETED",
+            "decision": "STOCK HEALTHY",
+            "details": f"Stock ({stock}) is above reorder point ({point}). No action needed."
+        }
+
+    # 3. ACTION: DRAFT PO (Low Stock)
+    total_cost = qty * float(cost)
+    print(f"--- IVAN: LOW STOCK! Drafting PO for {qty} units ---")
+
+    prompt = f"""
+    You are Ivan, an Inventory Manager.
+    Write a formal Purchase Order email to supplier "{email}".
+    
+    Order Details:
+    - Product: {name} (SKU: {sku})
+    - Quantity: {qty} units
+    - Unit Cost: ${cost}
+    - Total PO Value: ${total_cost:.2f}
+    
+    Request confirmation of the shipping date. Keep it professional.
+    """
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        email_draft = response.choices[0].message.content
+    except Exception as e:
+        email_draft = "Error drafting email."
+
+    return {
+        "status": "COMPLETED",
+        "decision": "REORDER TRIGGERED",
+        "po_details": {
+            "sku": sku,
+            "product": name,
+            "stock_level": f"CRITICAL ({stock} left)",
+            "order_qty": qty,
+            "total_cost": f"${total_cost:.2f}",
+            "supplier": email,
+            "email_draft": email_draft
+        }
+    }
