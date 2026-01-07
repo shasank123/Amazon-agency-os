@@ -13,3 +13,5 @@ langgraph # For Stateful Graphs
 asyncpg
 duckduckgo-search
 psycopg2-binary
+requests
+beautifulsoup4

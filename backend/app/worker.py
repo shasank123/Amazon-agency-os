@@ -6,6 +6,8 @@ from openai import OpenAI
 import os
 from duckduckgo_search import DDGS  # <--- The Search Engine
 import psycopg2
+import requests
+from bs4 import BeautifulSoup
 
 # Load API Key
 load_dotenv()
@@ -344,5 +346,102 @@ def ivan_task(sku: str):
             "total_cost": f"${total_cost:.2f}",
             "supplier": email,
             "email_draft": email_draft
+        }
+    }
+
+# --- AGENT 6: LISA (SEO Specialist) ---
+@celery_app.task(name="app.worker.lisa_task")
+def lisa_task(url: str, target_keyword: str):
+    print(f"--- LISA: Auditing {url} for '{target_keyword}' ---")
+    
+    # 1. FETCH CONTENT (The Eyes)
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            return {"status": "FAILED", "error": f"Site returned status {response.status_code}"}
+    except Exception as e:
+        return {"status": "FAILED", "error": f"Could not connect: {str(e)}"}
+
+    # 2. PARSE HTML (The Analysis)
+    soup = BeautifulSoup(response.content, 'html.parser')
+    text_content = soup.get_text(" ", strip=True)
+    word_count = len(text_content.split())
+    
+    # Extract specific tags
+    title_tag = soup.title.string if soup.title else None
+    h1_tag = soup.find('h1').get_text(strip=True) if soup.find('h1') else None
+    meta_desc = soup.find('meta', attrs={'name': 'description'})
+    meta_content = meta_desc['content'] if meta_desc else None
+
+    # 3. CALCULATE METRICS (Hard Logic)
+    keyword_count = text_content.lower().count(target_keyword.lower())
+    density = (keyword_count / word_count * 100) if word_count > 0 else 0
+    
+    issues = []
+    score = 100
+
+    # Edge Case: Thin Content
+    if word_count < 300:
+        issues.append("CRITICAL: Thin content (< 300 words). Google will ignore this.")
+        score -= 30
+    
+    # Edge Case: Missing H1
+    if not h1_tag:
+        issues.append("ERROR: Missing H1 Tag.")
+        score -= 20
+    
+    # Edge Case: Keyword Stuffing
+    if density > 3.5:
+        issues.append(f"WARNING: Keyword Stuffing detected ({density:.2f}% density). Aim for 1-2%.")
+        score -= 15
+    elif density == 0:
+        issues.append(f"MISSING: Target keyword '{target_keyword}' not found in text.")
+        score -= 20
+
+    # Edge Case: Title optimization
+    if not title_tag:
+        issues.append("ERROR: Missing Page Title.")
+        score -= 20
+    elif len(title_tag) > 60:
+        issues.append("WARNING: Title is too long (truncated in search results).")
+        score -= 5
+
+    # 4. AI STRATEGY (The Brain)
+    prompt = f"""
+    You are Lisa, a Senior SEO Strategist. 
+    Audit this content summary for the keyword: "{target_keyword}".
+    
+    Title: {title_tag}
+    H1: {h1_tag}
+    First 300 words: "{text_content[:1500]}..."
+    
+    Current Issues: {', '.join(issues)}
+    
+    Provide 3 actionable recommendations to improve ranking. 
+    Focus on semantic relevance and user intent. 
+    """
+
+    try:
+        llm_res = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        recommendations = llm_res.choices[0].message.content
+    except:
+        recommendations = "Could not generate AI recommendations."
+
+    return {
+        "status": "COMPLETED",
+        "audit": {
+            "url": url,
+            "score": max(0, score),
+            "metrics": {
+                "word_count": word_count,
+                "density": f"{density:.2f}%",
+                "h1_found": bool(h1_tag)
+            },
+            "issues": issues,
+            "recommendations": recommendations
         }
     }

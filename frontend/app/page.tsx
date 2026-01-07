@@ -568,11 +568,51 @@ function IvanCard() {
 
 // --- Lisa Card ---
 function LisaCard() {
-    const [sku, setSku] = useState('sku_123')
+    const [url, setUrl] = useState('https://example.com')
+    const [keyword, setKeyword] = useState('best product')
+    const [taskId, setTaskId] = useState<string | null>(null)
 
-    const query = useMutation({
-        mutationFn: () => lisaApi.auditListing(sku),
+    const startMutation = useMutation({
+        mutationFn: () => lisaApi.auditSite({ url, keyword }),
+        onSuccess: (res) => setTaskId(res.data.task_id),
     })
+
+    const statusQuery = useQuery({
+        queryKey: ['lisa-task', taskId],
+        queryFn: () => lisaApi.getTaskStatus(taskId!),
+        enabled: !!taskId,
+        refetchInterval: (query) => {
+            const status = query.state.data?.data.status
+            if (status === 'SUCCESS' || status === 'FAILURE') return false
+            return 2000
+        },
+    })
+
+    const taskStatus = statusQuery.data?.data.status
+    const taskResult = statusQuery.data?.data.result as {
+        audit?: {
+            url: string
+            score: number
+            metrics: { word_count: number; density: string; h1_found: boolean }
+            issues: string[]
+            recommendations: string
+        }
+        error?: string
+    } | null
+    const isComplete = taskStatus === 'SUCCESS'
+    const isFailed = taskStatus === 'FAILURE'
+
+    const getScoreColor = (score: number) => {
+        if (score >= 80) return 'text-green-400'
+        if (score >= 50) return 'text-yellow-400'
+        return 'text-red-400'
+    }
+
+    const getScoreBadgeVariant = (score: number): 'default' | 'destructive' | 'secondary' => {
+        if (score >= 80) return 'default'
+        if (score >= 50) return 'secondary'
+        return 'destructive'
+    }
 
     return (
         <Card>
@@ -582,40 +622,90 @@ function LisaCard() {
                         <Search className="h-5 w-5 text-cyan-500" />
                         <CardTitle className="text-lg">Lisa</CardTitle>
                     </div>
-                    <Badge variant="outline">SEO</Badge>
+                    <Badge variant="outline">SEO Audit</Badge>
                 </div>
-                <CardDescription>Listing keyword audit</CardDescription>
+                <CardDescription>Website SEO analysis + AI recommendations</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
                 <Input
-                    placeholder="SKU"
-                    value={sku}
-                    onChange={(e) => setSku(e.target.value)}
+                    placeholder="URL to audit (e.g. https://example.com)"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    disabled={!!taskId && !isComplete && !isFailed}
                 />
+                <Input
+                    placeholder="Target keyword"
+                    value={keyword}
+                    onChange={(e) => setKeyword(e.target.value)}
+                    disabled={!!taskId && !isComplete && !isFailed}
+                />
+
                 <Button
                     className="w-full"
-                    onClick={() => query.mutate()}
-                    disabled={query.isPending || !sku}
+                    onClick={() => { setTaskId(null); startMutation.mutate() }}
+                    disabled={startMutation.isPending || (!!taskId && !isComplete && !isFailed) || !url || !keyword}
                 >
-                    {query.isPending ? (
+                    {startMutation.isPending || (taskId && !isComplete && !isFailed) ? (
                         <Loader2 className="h-4 w-4 animate-spin mr-2" />
                     ) : (
                         <Play className="h-4 w-4 mr-2" />
                     )}
-                    Audit Listing
+                    {isComplete ? 'Audit Again' : 'Run SEO Audit'}
                 </Button>
-                {query.data && (
-                    <div className="text-sm space-y-2">
-                        <div className="p-2 bg-muted rounded">
-                            <p className="text-muted-foreground text-xs mb-1">Missing Keywords:</p>
-                            <p className="text-yellow-400 text-xs break-words whitespace-normal">
-                                {query.data.data.missing_keywords.join(', ')}
-                            </p>
+
+                {isComplete && taskResult?.error && (
+                    <div className="p-2 bg-red-500/10 rounded text-xs text-red-400">
+                        ⚠️ {taskResult.error}
+                    </div>
+                )}
+
+                {isComplete && taskResult?.audit && (
+                    <div className="space-y-2">
+                        {/* Score Badge */}
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs text-muted-foreground">SEO Score:</span>
+                            <Badge variant={getScoreBadgeVariant(taskResult.audit.score)}>
+                                <span className={`font-bold ${getScoreColor(taskResult.audit.score)}`}>
+                                    {taskResult.audit.score}/100
+                                </span>
+                            </Badge>
                         </div>
-                        <div className="p-2 bg-muted rounded">
-                            <p className="text-muted-foreground text-xs mb-1">Optimized Title:</p>
-                            <p className="text-green-400 text-xs break-words whitespace-normal leading-relaxed">
-                                {query.data.data.optimized_title}
+
+                        {/* Metrics Grid */}
+                        <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                            <div className="p-2 bg-muted rounded">
+                                <p className="text-muted-foreground">Words</p>
+                                <p className="font-bold text-blue-400">{taskResult.audit.metrics.word_count}</p>
+                            </div>
+                            <div className="p-2 bg-muted rounded">
+                                <p className="text-muted-foreground">Density</p>
+                                <p className="font-bold text-purple-400">{taskResult.audit.metrics.density}</p>
+                            </div>
+                            <div className="p-2 bg-muted rounded">
+                                <p className="text-muted-foreground">H1 Tag</p>
+                                <p className={`font-bold ${taskResult.audit.metrics.h1_found ? 'text-green-400' : 'text-red-400'}`}>
+                                    {taskResult.audit.metrics.h1_found ? '✓ Found' : '✗ Missing'}
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Issues List */}
+                        {taskResult.audit.issues.length > 0 && (
+                            <div className="p-2 bg-yellow-500/10 rounded space-y-1 max-h-24 overflow-y-auto">
+                                <p className="text-xs text-muted-foreground mb-1">⚠️ Issues Found:</p>
+                                {taskResult.audit.issues.map((issue, i) => (
+                                    <p key={i} className="text-xs text-yellow-400 break-words whitespace-normal">
+                                        • {issue}
+                                    </p>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* AI Recommendations */}
+                        <div className="p-2 bg-cyan-500/10 rounded max-h-40 overflow-y-auto">
+                            <p className="text-xs text-muted-foreground mb-1">🤖 AI Recommendations:</p>
+                            <p className="text-xs text-cyan-400 break-words whitespace-pre-wrap leading-relaxed">
+                                {taskResult.audit.recommendations}
                             </p>
                         </div>
                     </div>

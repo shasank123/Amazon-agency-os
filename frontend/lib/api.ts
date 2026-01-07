@@ -122,16 +122,17 @@ export const ivanApi = {
 }
 
 // --- Lisa (SEO Agent) ---
-export interface LisaResponse {
-    agent: string
-    current_title: string
-    missing_keywords: string[]
-    optimized_title: string
+export interface SeoRequest {
+    url: string
+    keyword: string
 }
 
 export const lisaApi = {
-    auditListing: (sku: string) =>
-        api.get<LisaResponse>(`/agents/lisa/audit-listing/${sku}`),
+    auditSite: (data: SeoRequest) =>
+        api.post('/agents/lisa/audit', data),
+
+    getTaskStatus: (taskId: string) =>
+        api.get<TaskStatus>(`/tasks/${taskId}`),
 }
 
 export default api

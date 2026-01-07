@@ -6,7 +6,7 @@ import random
 from app.agents.sue_graph import sue_graph
 
 # Import the tasks
-from app.worker import jeff_task, penny_task, sue_task, adam_task, ivan_task
+from app.worker import jeff_task, penny_task, sue_task, adam_task, ivan_task, lisa_task
 from celery.result import AsyncResult
 
 # Import Mock Data
@@ -168,27 +168,16 @@ async def start_ivan(request: InventoryRequest):
     task = ivan_task.delay(request.sku)
     return {"agent": "Ivan", "task_id": task.id, "status": "checking_inventory"}
 
+# --- REQUEST MODEL ---
+class SeoRequest(BaseModel):
+    url: str
+    keyword: str
+
 # --- 6. LISA (SEO Agent) ---
-@app.get("/agents/lisa/audit-listing/{sku}")
-def lisa_audit_listing(sku: str):
-    """
-    Simulates Lisa comparing your title to competitors.
-    """
-    if sku not in MOCK_INVENTORY:
-        raise HTTPException(status_code=404, detail="SKU not found")
-        
-    product = MOCK_INVENTORY[sku]
-    # Fake competitor data
-    competitor_keywords = ["Indestructible", "Chew Proof", "Puppy Safe"]
-    
-    missing = [kw for kw in competitor_keywords if kw.lower() not in product["name"].lower()]
-    
-    return {
-        "agent": "Lisa",
-        "current_title": product["name"],
-        "missing_keywords": missing,
-        "optimized_title": f"{product['name']} - {' '.join(missing)}"
-    }
+@app.post("/agents/lisa/audit")
+async def start_lisa(request: SeoRequest):
+    task = lisa_task.delay(request.url, request.keyword)
+    return {"agent": "Lisa", "task_id": task.id, "status": "auditing_site"}
 
 # We use a global variable to simulate "User Session" for the demo
 # In production, this "thread_id" comes from the Frontend (User ID)
