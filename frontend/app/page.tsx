@@ -42,40 +42,66 @@ export default function Dashboard() {
     )
 }
 
-// --- Jeff Card ---
+// --- Jeff Card (HITL) ---
 function JeffCard() {
     const [niche, setNiche] = useState('Baby Care')
     const [minRevenue, setMinRevenue] = useState(10000)
-    const [taskId, setTaskId] = useState<string | null>(null)
+    const [editedEmail, setEditedEmail] = useState('')
 
+    // Workflow states: idle, searching, pending_approval, sending, completed, rejected
+    const [workflowState, setWorkflowState] = useState<'idle' | 'searching' | 'pending_approval' | 'sending' | 'completed' | 'rejected'>('idle')
+    const [workflowData, setWorkflowData] = useState<{
+        prospect?: { name: string; url: string; snippet: string }
+        email_draft?: string
+        final_email?: string
+    } | null>(null)
+
+    // Start HITL workflow
     const startMutation = useMutation({
-        mutationFn: () => jeffApi.startCampaign({ niche, min_revenue: minRevenue }),
-        onSuccess: (res) => setTaskId(res.data.task_id),
+        mutationFn: () => jeffApi.startWorkflow({ niche, min_revenue: minRevenue }),
+        onMutate: () => setWorkflowState('searching'),
+        onSuccess: (res) => {
+            setWorkflowData({
+                prospect: res.data.prospect,
+                email_draft: res.data.email_draft,
+            })
+            setEditedEmail(res.data.email_draft)
+            setWorkflowState('pending_approval')
+        },
+        onError: () => setWorkflowState('idle'),
     })
 
-    const statusQuery = useQuery({
-        queryKey: ['jeff-task', taskId],
-        queryFn: () => jeffApi.getTaskStatus(taskId!),
-        enabled: !!taskId,
-        refetchInterval: (query) => {
-            // Stop polling when task completes or fails
-            const status = query.state.data?.data.status
-            if (status === 'SUCCESS' || status === 'FAILURE') {
-                return false
-            }
-            return 2000 // Poll every 2s while pending
+    // Approve workflow
+    const approveMutation = useMutation({
+        mutationFn: () => jeffApi.approve(editedEmail),
+        onMutate: () => setWorkflowState('sending'),
+        onSuccess: (res) => {
+            setWorkflowData(prev => ({ ...prev, final_email: res.data.final_email }))
+            setWorkflowState('completed')
+        },
+        onError: () => setWorkflowState('pending_approval'),
+    })
+
+    // Reject workflow
+    const rejectMutation = useMutation({
+        mutationFn: () => jeffApi.reject(),
+        onSuccess: () => {
+            setWorkflowState('rejected')
+            setTimeout(() => {
+                setWorkflowState('idle')
+                setWorkflowData(null)
+                setEditedEmail('')
+            }, 2000)
         },
     })
 
-    const taskStatus = statusQuery.data?.data.status
-    const taskResult = statusQuery.data?.data.result as { leads?: string[] } | null
-    const isComplete = taskStatus === 'SUCCESS'
-    const isFailed = taskStatus === 'FAILURE'
-    const isPending = taskStatus === 'PENDING' || taskStatus === 'STARTED'
-
-    const resetTask = () => {
-        setTaskId(null)
+    const resetWorkflow = () => {
+        setWorkflowState('idle')
+        setWorkflowData(null)
+        setEditedEmail('')
     }
+
+    const isProcessing = workflowState === 'searching' || workflowState === 'sending'
 
     return (
         <Card>
@@ -85,82 +111,130 @@ function JeffCard() {
                         <Users className="h-5 w-5 text-blue-500" />
                         <CardTitle className="text-lg">Jeff</CardTitle>
                     </div>
-                    <Badge variant="outline">Sales/SDR</Badge>
+                    <Badge variant="outline">Sales/SDR (HITL)</Badge>
                 </div>
-                <CardDescription>Lead scraping & outreach</CardDescription>
+                <CardDescription>Lead scraping & outreach with human approval</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-                <div className="space-y-2">
-                    <Input
-                        placeholder="Niche"
-                        value={niche}
-                        onChange={(e) => setNiche(e.target.value)}
-                        disabled={!!taskId && !isComplete}
-                    />
-                    <Input
-                        type="number"
-                        placeholder="Min Revenue"
-                        value={minRevenue}
-                        onChange={(e) => setMinRevenue(Number(e.target.value))}
-                        disabled={!!taskId && !isComplete}
-                    />
-                </div>
-
-                {!taskId || isComplete || isFailed ? (
-                    <Button
-                        className="w-full"
-                        onClick={() => {
-                            resetTask()
-                            startMutation.mutate()
-                        }}
-                        disabled={startMutation.isPending}
-                    >
-                        {startMutation.isPending ? (
-                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                        ) : (
-                            <Play className="h-4 w-4 mr-2" />
-                        )}
-                        {isComplete ? 'Run Again' : 'Start Campaign'}
-                    </Button>
-                ) : (
-                    <Button className="w-full" disabled variant="secondary">
-                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                        Processing...
-                    </Button>
+                {/* Input Section - Only show when idle or completed */}
+                {(workflowState === 'idle' || workflowState === 'completed' || workflowState === 'rejected') && (
+                    <div className="space-y-2">
+                        <Input
+                            placeholder="Niche"
+                            value={niche}
+                            onChange={(e) => setNiche(e.target.value)}
+                        />
+                        <Input
+                            type="number"
+                            placeholder="Min Revenue"
+                            value={minRevenue}
+                            onChange={(e) => setMinRevenue(Number(e.target.value))}
+                        />
+                        <Button
+                            className="w-full"
+                            onClick={() => {
+                                resetWorkflow()
+                                startMutation.mutate()
+                            }}
+                            disabled={startMutation.isPending}
+                        >
+                            {startMutation.isPending ? (
+                                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            ) : (
+                                <Play className="h-4 w-4 mr-2" />
+                            )}
+                            {workflowState === 'completed' ? 'Start New Campaign' : 'Start Campaign'}
+                        </Button>
+                    </div>
                 )}
 
-                {taskId && (
-                    <div className="text-sm space-y-2">
-                        <div className="flex items-center gap-2">
-                            <span className="text-muted-foreground">Status:</span>
-                            {isComplete ? (
-                                <Badge variant="default" className="bg-green-600">
-                                    <CheckCircle2 className="h-3 w-3 mr-1" />
-                                    Complete
-                                </Badge>
-                            ) : isFailed ? (
-                                <Badge variant="destructive">
-                                    <AlertCircle className="h-3 w-3 mr-1" />
-                                    Failed
-                                </Badge>
-                            ) : (
-                                <Badge variant="secondary">
-                                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                                    {taskStatus || 'Queued'}
-                                </Badge>
-                            )}
+                {/* Searching State */}
+                {workflowState === 'searching' && (
+                    <div className="p-4 bg-blue-500/10 rounded flex items-center gap-3">
+                        <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+                        <div>
+                            <p className="text-sm font-medium">Searching for prospects...</p>
+                            <p className="text-xs text-muted-foreground">Jeff is finding leads in "{niche}"</p>
+                        </div>
+                    </div>
+                )}
+
+                {/* Pending Approval State - Show Draft for Review */}
+                {workflowState === 'pending_approval' && workflowData && (
+                    <div className="space-y-3">
+                        {/* Prospect Info */}
+                        <div className="p-2 bg-muted rounded">
+                            <p className="text-xs text-muted-foreground mb-1">📎 Prospect Found:</p>
+                            <p className="text-sm font-medium text-blue-400">{workflowData.prospect?.name}</p>
+                            <p className="text-xs text-muted-foreground break-all">{workflowData.prospect?.url}</p>
                         </div>
 
-                        {/* Show results when complete */}
-                        {isComplete && taskResult?.leads && taskResult.leads.length > 0 && (
-                            <div className="p-2 bg-muted rounded space-y-2 max-h-48 overflow-y-auto">
-                                {taskResult.leads.map((lead, i) => (
-                                    <p key={i} className="text-xs text-green-400 break-words whitespace-normal leading-relaxed">
-                                        ✓ {lead}
-                                    </p>
-                                ))}
-                            </div>
-                        )}
+                        {/* Editable Email Draft */}
+                        <div>
+                            <p className="text-xs text-muted-foreground mb-1">✏️ Edit Email Draft:</p>
+                            <textarea
+                                className="w-full p-2 rounded bg-muted text-sm border border-input min-h-[120px] resize-y"
+                                value={editedEmail}
+                                onChange={(e) => setEditedEmail(e.target.value)}
+                            />
+                        </div>
+
+                        {/* Approve/Reject Buttons */}
+                        <div className="flex gap-2">
+                            <Button
+                                className="flex-1 bg-green-600 hover:bg-green-700"
+                                onClick={() => approveMutation.mutate()}
+                                disabled={approveMutation.isPending || !editedEmail}
+                            >
+                                {approveMutation.isPending ? (
+                                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                ) : (
+                                    <CheckCircle2 className="h-4 w-4 mr-2" />
+                                )}
+                                Approve & Send
+                            </Button>
+                            <Button
+                                variant="destructive"
+                                onClick={() => rejectMutation.mutate()}
+                                disabled={rejectMutation.isPending}
+                            >
+                                <AlertCircle className="h-4 w-4 mr-2" />
+                                Reject
+                            </Button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Sending State */}
+                {workflowState === 'sending' && (
+                    <div className="p-4 bg-green-500/10 rounded flex items-center gap-3">
+                        <Loader2 className="h-5 w-5 animate-spin text-green-500" />
+                        <div>
+                            <p className="text-sm font-medium">Sending email...</p>
+                            <p className="text-xs text-muted-foreground">Jeff is sending the approved email</p>
+                        </div>
+                    </div>
+                )}
+
+                {/* Completed State */}
+                {workflowState === 'completed' && workflowData && (
+                    <div className="space-y-2">
+                        <div className="p-3 bg-green-500/10 rounded flex items-center gap-2">
+                            <CheckCircle2 className="h-5 w-5 text-green-500" />
+                            <span className="text-sm font-medium text-green-400">Email Sent Successfully!</span>
+                        </div>
+                        <div className="p-2 bg-muted rounded max-h-32 overflow-y-auto">
+                            <p className="text-xs text-muted-foreground mb-1">📧 Sent to: {workflowData.prospect?.name}</p>
+                            <p className="text-xs text-green-400 whitespace-pre-wrap">{workflowData.final_email}</p>
+                        </div>
+                    </div>
+                )}
+
+                {/* Rejected State */}
+                {workflowState === 'rejected' && (
+                    <div className="p-3 bg-red-500/10 rounded flex items-center gap-2">
+                        <AlertCircle className="h-5 w-5 text-red-500" />
+                        <span className="text-sm font-medium text-red-400">Draft Rejected - Resetting...</span>
                     </div>
                 )}
             </CardContent>
@@ -365,33 +439,64 @@ function AdamCard() {
     )
 }
 
-// --- Sue Card ---
+// --- Sue Card (HITL) ---
 function SueCard() {
     const [ticket, setTicket] = useState('I want a refund for my order')
     const [orderStatus, setOrderStatus] = useState('Delivered')
-    const [taskId, setTaskId] = useState<string | null>(null)
+    const [editedReply, setEditedReply] = useState('')
 
+    // Workflow states: idle, drafting, pending_approval, publishing, completed, rejected
+    const [workflowState, setWorkflowState] = useState<'idle' | 'drafting' | 'pending_approval' | 'publishing' | 'completed' | 'rejected'>('idle')
+    const [workflowData, setWorkflowData] = useState<{
+        policy_retrieved?: string
+        draft_reply?: string
+        final_reply?: string
+    } | null>(null)
+
+    // Start HITL workflow
     const startMutation = useMutation({
-        mutationFn: () => sueApi.handleTicket({ ticket_text: ticket, order_status: orderStatus }),
-        onSuccess: (res) => setTaskId(res.data.task_id),
+        mutationFn: () => sueApi.startWorkflow({ ticket_text: ticket, order_status: orderStatus }),
+        onMutate: () => setWorkflowState('drafting'),
+        onSuccess: (res) => {
+            setWorkflowData({
+                policy_retrieved: res.data.policy_retrieved,
+                draft_reply: res.data.draft_reply,
+            })
+            setEditedReply(res.data.draft_reply)
+            setWorkflowState('pending_approval')
+        },
+        onError: () => setWorkflowState('idle'),
     })
 
-    const statusQuery = useQuery({
-        queryKey: ['sue-task', taskId],
-        queryFn: () => sueApi.getTaskStatus(taskId!),
-        enabled: !!taskId,
-        refetchInterval: (query) => {
-            const status = query.state.data?.data.status
-            if (status === 'SUCCESS' || status === 'FAILURE') return false
-            return 2000
+    // Approve workflow
+    const approveMutation = useMutation({
+        mutationFn: () => sueApi.approve(editedReply),
+        onMutate: () => setWorkflowState('publishing'),
+        onSuccess: (res) => {
+            setWorkflowData(prev => ({ ...prev, final_reply: res.data.final_reply }))
+            setWorkflowState('completed')
+        },
+        onError: () => setWorkflowState('pending_approval'),
+    })
+
+    // Reject workflow
+    const rejectMutation = useMutation({
+        mutationFn: () => sueApi.reject(),
+        onSuccess: () => {
+            setWorkflowState('rejected')
+            setTimeout(() => {
+                setWorkflowState('idle')
+                setWorkflowData(null)
+                setEditedReply('')
+            }, 2000)
         },
     })
 
-    const taskStatus = statusQuery.data?.data.status
-    const taskResult = statusQuery.data?.data.result as {
-        response?: { reply: string; policy_used: string }
-    } | null
-    const isComplete = taskStatus === 'SUCCESS'
+    const resetWorkflow = () => {
+        setWorkflowState('idle')
+        setWorkflowData(null)
+        setEditedReply('')
+    }
 
     return (
         <Card>
@@ -401,54 +506,135 @@ function SueCard() {
                         <MessageSquare className="h-5 w-5 text-purple-500" />
                         <CardTitle className="text-lg">Sue</CardTitle>
                     </div>
-                    <Badge variant="outline">RAG Support</Badge>
+                    <Badge variant="outline">RAG Support (HITL)</Badge>
                 </div>
-                <CardDescription>Policy retrieval + AI response</CardDescription>
+                <CardDescription>Policy retrieval + AI response with human approval</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-                <Input
-                    placeholder="Customer issue..."
-                    value={ticket}
-                    onChange={(e) => setTicket(e.target.value)}
-                />
-                <select
-                    className="w-full p-2 rounded bg-muted text-sm border border-input"
-                    value={orderStatus}
-                    onChange={(e) => setOrderStatus(e.target.value)}
-                >
-                    <option value="Delivered">Delivered</option>
-                    <option value="In Transit">In Transit</option>
-                    <option value="Processing">Processing</option>
-                    <option value="Cancelled">Cancelled</option>
-                </select>
-
-                <Button
-                    className="w-full"
-                    onClick={() => { setTaskId(null); startMutation.mutate() }}
-                    disabled={startMutation.isPending || (!!taskId && !isComplete) || !ticket}
-                >
-                    {startMutation.isPending || (taskId && !isComplete) ? (
-                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                        <Play className="h-4 w-4 mr-2" />
-                    )}
-                    {isComplete ? 'Handle Another' : 'Handle Ticket'}
-                </Button>
-
-                {isComplete && taskResult?.response && (
+                {/* Input Section - Only show when idle or completed */}
+                {(workflowState === 'idle' || workflowState === 'completed' || workflowState === 'rejected') && (
                     <div className="space-y-2">
+                        <Input
+                            placeholder="Customer issue..."
+                            value={ticket}
+                            onChange={(e) => setTicket(e.target.value)}
+                        />
+                        <select
+                            className="w-full p-2 rounded bg-muted text-sm border border-input"
+                            value={orderStatus}
+                            onChange={(e) => setOrderStatus(e.target.value)}
+                        >
+                            <option value="Delivered">Delivered</option>
+                            <option value="In Transit">In Transit</option>
+                            <option value="Processing">Processing</option>
+                            <option value="Cancelled">Cancelled</option>
+                        </select>
+                        <Button
+                            className="w-full"
+                            onClick={() => {
+                                resetWorkflow()
+                                startMutation.mutate()
+                            }}
+                            disabled={startMutation.isPending || !ticket}
+                        >
+                            {startMutation.isPending ? (
+                                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            ) : (
+                                <Play className="h-4 w-4 mr-2" />
+                            )}
+                            {workflowState === 'completed' ? 'Handle New Ticket' : 'Handle Ticket'}
+                        </Button>
+                    </div>
+                )}
+
+                {/* Drafting State */}
+                {workflowState === 'drafting' && (
+                    <div className="p-4 bg-purple-500/10 rounded flex items-center gap-3">
+                        <Loader2 className="h-5 w-5 animate-spin text-purple-500" />
+                        <div>
+                            <p className="text-sm font-medium">Drafting response...</p>
+                            <p className="text-xs text-muted-foreground">Sue is retrieving policy and generating reply</p>
+                        </div>
+                    </div>
+                )}
+
+                {/* Pending Approval State - Show Draft for Review */}
+                {workflowState === 'pending_approval' && workflowData && (
+                    <div className="space-y-3">
+                        {/* Policy Retrieved */}
                         <div className="p-2 bg-blue-500/10 rounded">
                             <p className="text-xs text-muted-foreground mb-1">📋 Policy Retrieved:</p>
-                            <p className="text-xs text-blue-400 break-words whitespace-normal">
-                                {taskResult.response.policy_used}
+                            <p className="text-xs text-blue-400 break-words whitespace-normal max-h-16 overflow-y-auto">
+                                {workflowData.policy_retrieved}
                             </p>
                         </div>
-                        <div className="p-2 bg-muted rounded">
-                            <p className="text-xs text-muted-foreground mb-1">💬 AI Response:</p>
-                            <p className="text-sm text-green-400 break-words whitespace-normal leading-relaxed">
-                                {taskResult.response.reply}
-                            </p>
+
+                        {/* Editable Reply Draft */}
+                        <div>
+                            <p className="text-xs text-muted-foreground mb-1">✏️ Edit Reply Draft:</p>
+                            <textarea
+                                className="w-full p-2 rounded bg-muted text-sm border border-input min-h-[100px] resize-y"
+                                value={editedReply}
+                                onChange={(e) => setEditedReply(e.target.value)}
+                            />
                         </div>
+
+                        {/* Approve/Reject Buttons */}
+                        <div className="flex gap-2">
+                            <Button
+                                className="flex-1 bg-green-600 hover:bg-green-700"
+                                onClick={() => approveMutation.mutate()}
+                                disabled={approveMutation.isPending || !editedReply}
+                            >
+                                {approveMutation.isPending ? (
+                                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                ) : (
+                                    <CheckCircle2 className="h-4 w-4 mr-2" />
+                                )}
+                                Approve & Publish
+                            </Button>
+                            <Button
+                                variant="destructive"
+                                onClick={() => rejectMutation.mutate()}
+                                disabled={rejectMutation.isPending}
+                            >
+                                <AlertCircle className="h-4 w-4 mr-2" />
+                                Reject
+                            </Button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Publishing State */}
+                {workflowState === 'publishing' && (
+                    <div className="p-4 bg-green-500/10 rounded flex items-center gap-3">
+                        <Loader2 className="h-5 w-5 animate-spin text-green-500" />
+                        <div>
+                            <p className="text-sm font-medium">Publishing reply...</p>
+                            <p className="text-xs text-muted-foreground">Sue is posting the approved response</p>
+                        </div>
+                    </div>
+                )}
+
+                {/* Completed State */}
+                {workflowState === 'completed' && workflowData && (
+                    <div className="space-y-2">
+                        <div className="p-3 bg-green-500/10 rounded flex items-center gap-2">
+                            <CheckCircle2 className="h-5 w-5 text-green-500" />
+                            <span className="text-sm font-medium text-green-400">Reply Published Successfully!</span>
+                        </div>
+                        <div className="p-2 bg-muted rounded max-h-32 overflow-y-auto">
+                            <p className="text-xs text-muted-foreground mb-1">💬 Published Reply:</p>
+                            <p className="text-xs text-green-400 whitespace-pre-wrap">{workflowData.final_reply}</p>
+                        </div>
+                    </div>
+                )}
+
+                {/* Rejected State */}
+                {workflowState === 'rejected' && (
+                    <div className="p-3 bg-red-500/10 rounded flex items-center gap-2">
+                        <AlertCircle className="h-5 w-5 text-red-500" />
+                        <span className="text-sm font-medium text-red-400">Draft Rejected - Resetting...</span>
                     </div>
                 )}
             </CardContent>

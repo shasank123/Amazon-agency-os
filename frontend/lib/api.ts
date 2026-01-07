@@ -20,12 +20,42 @@ export interface TaskStatus {
     result: unknown
 }
 
+export interface JeffWorkflowResponse {
+    agent: string
+    status: string
+    prospect: {
+        name: string
+        url: string
+        snippet: string
+    }
+    email_draft: string
+    message: string
+}
+
+export interface JeffApproveResponse {
+    agent: string
+    status: string
+    final_email: string
+    message: string
+}
+
 export const jeffApi = {
+    // Legacy Celery-based endpoint (for reference)
     startCampaign: (data: CampaignRequest) =>
         api.post('/agents/jeff/start-campaign', data),
 
     getTaskStatus: (taskId: string) =>
         api.get<TaskStatus>(`/tasks/${taskId}`),
+
+    // HITL Workflow endpoints
+    startWorkflow: (data: CampaignRequest) =>
+        api.post<JeffWorkflowResponse>('/agents/jeff/start-workflow', data),
+
+    approve: (edited_email: string) =>
+        api.post<JeffApproveResponse>('/agents/jeff/approve', { edited_email }),
+
+    reject: () =>
+        api.post('/agents/jeff/reject'),
 }
 
 // --- Penny (Pricing Agent) ---
@@ -74,38 +104,43 @@ export const adamApi = {
 }
 
 // --- Sue (Reputation Agent) ---
-export interface SueDraftResponse {
-    status: string
-    draft: string
-    message: string
-}
-
-export interface SueApproveResponse {
-    status: string
-    final_output: string
-}
-
 export interface TicketRequest {
     ticket_text: string
     order_status: string
 }
 
+export interface SueWorkflowResponse {
+    agent: string
+    status: string
+    policy_retrieved: string
+    draft_reply: string
+    message: string
+}
+
+export interface SueApproveResponse {
+    agent: string
+    status: string
+    final_reply: string
+    message: string
+}
+
 export const sueApi = {
-    startWorkflow: (review: string) =>
-        api.post<SueDraftResponse>('/agents/sue/start-workflow', null, {
-            params: { review },
-        }),
-
-    approve: (editedText: string) =>
-        api.post<SueApproveResponse>('/agents/sue/approve', null, {
-            params: { edited_text: editedText },
-        }),
-
+    // Legacy Celery-based endpoint (for reference)
     handleTicket: (data: TicketRequest) =>
         api.post('/agents/sue/handle-ticket', data),
 
     getTaskStatus: (taskId: string) =>
         api.get<TaskStatus>(`/tasks/${taskId}`),
+
+    // HITL Workflow endpoints
+    startWorkflow: (data: TicketRequest) =>
+        api.post<SueWorkflowResponse>('/agents/sue/start-workflow', data),
+
+    approve: (edited_reply: string) =>
+        api.post<SueApproveResponse>('/agents/sue/approve', { edited_reply }),
+
+    reject: () =>
+        api.post('/agents/sue/reject'),
 }
 
 // --- Ivan (Inventory Agent) ---

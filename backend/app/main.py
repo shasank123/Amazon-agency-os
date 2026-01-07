@@ -4,6 +4,7 @@ from typing import List, Optional
 import time
 import random
 from app.agents.sue_graph import sue_graph
+from app.agents.jeff_graph import jeff_graph
 
 # Import the tasks
 from app.worker import jeff_task, penny_task, sue_task, adam_task, ivan_task, lisa_task
@@ -179,49 +180,165 @@ async def start_lisa(request: SeoRequest):
     task = lisa_task.delay(request.url, request.keyword)
     return {"agent": "Lisa", "task_id": task.id, "status": "auditing_site"}
 
-# We use a global variable to simulate "User Session" for the demo
-# In production, this "thread_id" comes from the Frontend (User ID)
-THREAD_CONFIG = {"configurable": {"thread_id": "review_123"}}
+# We use global variables to simulate "User Session" for the demo
+# In production, these "thread_id"s come from the Frontend (User ID)
+JEFF_THREAD_CONFIG = {"configurable": {"thread_id": "jeff_session_123"}}
+SUE_THREAD_CONFIG = {"configurable": {"thread_id": "sue_session_123"}}
 
-@app.post("/agents/sue/start-workflow")
-def start_review_process(review: str):
+# =============================================================================
+# JEFF HITL (Human-in-the-Loop) ENDPOINTS
+# =============================================================================
+
+class JeffWorkflowRequest(BaseModel):
+    niche: str
+    min_revenue: int
+
+class JeffApproveRequest(BaseModel):
+    edited_email: str
+
+@app.post("/agents/jeff/start-workflow")
+def jeff_start_workflow(req: JeffWorkflowRequest):
     """
-    Step 1: Start the graph. It will run 'draft_node' and then STOP.
+    Step 1: Start Jeff's workflow. He will search for prospects, draft an email, then STOP.
+    Human reviews the email before it's "sent".
     """
-    initial_state = {"review_text": review, "draft": "", "final_response": "", "status": "START"}
+    initial_state = {
+        "niche": req.niche,
+        "min_revenue": req.min_revenue,
+        "prospect_name": "",
+        "prospect_url": "",
+        "prospect_snippet": "",
+        "email_draft": "",
+        "final_email": "",
+        "status": "START"
+    }
     
-    # Run until the interruption point
-    for event in sue_graph.stream(initial_state, THREAD_CONFIG):
+    # Run until the interruption point (before send_node)
+    for event in jeff_graph.stream(initial_state, JEFF_THREAD_CONFIG):
         pass
     
     # Fetch the current "Frozen" state
-    current_state = sue_graph.get_state(THREAD_CONFIG).values
+    current_state = jeff_graph.get_state(JEFF_THREAD_CONFIG).values
     
     return {
-        "status": "PAUSED_FOR_HUMAN",
-        "draft": current_state["draft"],
-        "message": "Sue has drafted a reply. Please call /approve to publish."
+        "agent": "Jeff",
+        "status": "PENDING_APPROVAL",
+        "prospect": {
+            "name": current_state.get("prospect_name", ""),
+            "url": current_state.get("prospect_url", ""),
+            "snippet": current_state.get("prospect_snippet", "")
+        },
+        "email_draft": current_state.get("email_draft", ""),
+        "message": "Jeff has drafted an email. Review and approve to send."
+    }
+
+@app.post("/agents/jeff/approve")
+def jeff_approve(req: JeffApproveRequest):
+    """
+    Step 2: Human approves (or edits) the email. Resume and "send".
+    """
+    # A. Update the state with the Human's edits
+    jeff_graph.update_state(
+        JEFF_THREAD_CONFIG,
+        {"final_email": req.edited_email}
+    )
+    
+    # B. Resume the graph (triggers send_node)
+    for event in jeff_graph.stream(None, JEFF_THREAD_CONFIG):
+        pass
+    
+    final_state = jeff_graph.get_state(JEFF_THREAD_CONFIG).values
+    
+    return {
+        "agent": "Jeff",
+        "status": final_state.get("status", "SENT"),
+        "final_email": final_state.get("final_email") or final_state.get("email_draft"),
+        "message": "Email has been sent!"
+    }
+
+@app.post("/agents/jeff/reject")
+def jeff_reject():
+    """
+    Human rejects the email. Reset the workflow.
+    """
+    return {
+        "agent": "Jeff",
+        "status": "REJECTED",
+        "message": "Email draft was rejected. Start a new campaign when ready."
+    }
+
+# =============================================================================
+# SUE HITL (Human-in-the-Loop) ENDPOINTS
+# =============================================================================
+
+class SueWorkflowRequest(BaseModel):
+    ticket_text: str
+    order_status: str
+
+class SueApproveRequest(BaseModel):
+    edited_reply: str
+
+@app.post("/agents/sue/start-workflow")
+def sue_start_workflow(req: SueWorkflowRequest):
+    """
+    Step 1: Start Sue's workflow. She retrieves policy, drafts a reply, then STOPS.
+    Human reviews the reply before it's "published".
+    """
+    initial_state = {
+        "ticket_text": req.ticket_text,
+        "order_status": req.order_status,
+        "policy_retrieved": "",
+        "draft_reply": "",
+        "final_reply": "",
+        "status": "START"
+    }
+    
+    # Run until the interruption point (before publish_node)
+    for event in sue_graph.stream(initial_state, SUE_THREAD_CONFIG):
+        pass
+    
+    # Fetch the current "Frozen" state
+    current_state = sue_graph.get_state(SUE_THREAD_CONFIG).values
+    
+    return {
+        "agent": "Sue",
+        "status": "PENDING_APPROVAL",
+        "policy_retrieved": current_state.get("policy_retrieved", ""),
+        "draft_reply": current_state.get("draft_reply", ""),
+        "message": "Sue has drafted a reply. Review and approve to publish."
     }
 
 @app.post("/agents/sue/approve")
-def approve_reply(edited_text: str):
+def sue_approve(req: SueApproveRequest):
     """
-    Step 2: Human approves (or edits). We update state and RESUME.
+    Step 2: Human approves (or edits) the reply. Resume and "publish".
     """
     # A. Update the state with the Human's edits
     sue_graph.update_state(
-        THREAD_CONFIG, 
-        {"final_response": edited_text} # Injecting human edit
+        SUE_THREAD_CONFIG,
+        {"final_reply": req.edited_reply}
     )
     
-    # B. Resume the graph (It triggers 'publish_node' now)
-    # We pass None because we are just resuming execution
-    for event in sue_graph.stream(None, THREAD_CONFIG):
+    # B. Resume the graph (triggers publish_node)
+    for event in sue_graph.stream(None, SUE_THREAD_CONFIG):
         pass
-        
-    final_state = sue_graph.get_state(THREAD_CONFIG).values
+    
+    final_state = sue_graph.get_state(SUE_THREAD_CONFIG).values
     
     return {
-        "status": final_state["status"], # Should be "PUBLISHED"
-        "final_output": final_state.get("final_response")
+        "agent": "Sue",
+        "status": final_state.get("status", "PUBLISHED"),
+        "final_reply": final_state.get("final_reply") or final_state.get("draft_reply"),
+        "message": "Reply has been published to Amazon!"
+    }
+
+@app.post("/agents/sue/reject")
+def sue_reject():
+    """
+    Human rejects the reply. Reset the workflow.
+    """
+    return {
+        "agent": "Sue",
+        "status": "REJECTED",
+        "message": "Reply draft was rejected. Handle a new ticket when ready."
     }
